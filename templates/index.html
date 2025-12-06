@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Paper Citation - Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #0b132b;
+      --panel: #1c2541;
+      --accent: #5bc0be;
+      --text: #e9f1f7;
+      --muted: #9fb3c8;
+      --danger: #ef476f;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 20% 20%, rgba(91,192,190,0.14), transparent 35%), radial-gradient(circle at 80% 0%, rgba(239,71,111,0.1), transparent 30%), var(--bg);
+      color: var(--text);
+      font-family: "Helvetica Neue", Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px;
+    }
+    .card {
+      width: min(960px, 100%);
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    h1 {
+      margin: 0 0 6px;
+      letter-spacing: 0.01em;
+    }
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    label {
+      display: block;
+      font-weight: 700;
+      margin: 14px 0 6px;
+      color: #fff;
+    }
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 14px;
+      background: rgba(0,0,0,0.18);
+      color: var(--text);
+      font: 15px/1.6 var(--mono);
+      outline: none;
+      resize: vertical;
+    }
+    textarea:focus {
+      border-color: rgba(91,192,190,0.7);
+      box-shadow: 0 0 0 2px rgba(91,192,190,0.15);
+    }
+    input[type="file"] {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.18);
+      color: var(--text);
+    }
+    input[type="file"]::file-selector-button {
+      background: rgba(91,192,190,0.2);
+      border: 1px solid rgba(91,192,190,0.5);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button {
+      margin-top: 12px;
+      background: linear-gradient(120deg, var(--accent), #3aafa9);
+      border: none;
+      color: #0b132b;
+      padding: 12px 18px;
+      border-radius: 999px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+      box-shadow: 0 12px 30px rgba(91,192,190,0.25);
+    }
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); box-shadow: none; }
+    .results {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.18);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      background: rgba(91,192,190,0.12);
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .reference {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.03);
+      border: 1px dashed rgba(255,255,255,0.08);
+    }
+    .reference strong { color: #fff; }
+    .muted { color: var(--muted); }
+    .section {
+      margin-top: 24px;
+      padding: 16px;
+      border-radius: 12px;
+      background: rgba(0,0,0,0.12);
+      border: 1px solid rgba(255,255,255,0.04);
+    }
+    .section h2 {
+      margin: 0 0 8px;
+      color: #fff;
+    }
+    .inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    @media (max-width: 640px) {
+      .card { padding: 20px; }
+      textarea { min-height: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Smart Paper Citation</h1>
+    <p>Drop your manuscript text below. We'll scan for <code>{REF}</code> placeholders and prep the snippets to feed into your AI search.</p>
+    <form id="text-form">
+      <label class="muted" for="manuscript">Manuscript text</label>
+      <textarea id="manuscript" name="manuscript" placeholder="Paste text containing {REF} markers..." required></textarea>
+      <button type="submit">Analyze for References</button>
+    </form>
+    <section id="results" class="results" aria-live="polite">
+      <div class="muted">Awaiting input...</div>
+    </section>
+    <section id="resolve-results" class="results" aria-live="polite">
+      <div class="muted">No resolved output yet.</div>
+    </section>
+
+    <section class="section">
+      <h2>Reference sources</h2>
+      <p>Upload PDFs or drop in URLs for the papers you want the AI to search.</p>
+      <form id="sources-form" enctype="multipart/form-data">
+        <label for="source-files">Upload documents (PDF/TXT/Doc)</label>
+        <input id="source-files" name="files" type="file" accept=".pdf,.txt,.doc,.docx,.md" multiple>
+        <label for="source-links">Links (one per line)</label>
+        <textarea id="source-links" name="links" placeholder="https://doi.org/...&#10;https://arxiv.org/abs/..."></textarea>
+        <button type="submit">Save sources</button>
+      </form>
+      <div id="source-results" class="results" aria-live="polite">
+        <div class="muted">No sources uploaded yet.</div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Vector index</h2>
+      <div class="inline" style="margin-bottom:10px;">
+        <button type="button" id="ingest-button">Ingest uploads into index</button>
+        <span id="vector-status" class="muted">Index status loading...</span>
+      </div>
+      <div id="ingest-results" class="results" aria-live="polite">
+        <div class="muted">No ingestion run yet.</div>
+      </div>
+      <form id="query-form" style="margin-top:16px;">
+        <label for="query-text">Query text</label>
+        <textarea id="query-text" name="query" placeholder="Ask about your uploaded papers..." required></textarea>
+        <label for="query-k">Top K</label>
+        <input id="query-k" name="k" type="number" min="1" max="20" value="5" style="width:120px;">
+        <button type="submit">Search vector index</button>
+      </form>
+      <div id="query-results" class="results" aria-live="polite">
+        <div class="muted">No query run yet.</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("text-form");
+    const textarea = document.getElementById("manuscript");
+    const results = document.getElementById("results");
+    const resolveResults = document.getElementById("resolve-results");
+    const sourcesForm = document.getElementById("sources-form");
+    const sourceFiles = document.getElementById("source-files");
+    const sourceLinks = document.getElementById("source-links");
+    const sourceResults = document.getElementById("source-results");
+    const ingestButton = document.getElementById("ingest-button");
+    const ingestResults = document.getElementById("ingest-results");
+    const vectorStatus = document.getElementById("vector-status");
+    const queryForm = document.getElementById("query-form");
+    const queryText = document.getElementById("query-text");
+    const queryK = document.getElementById("query-k");
+    const queryResults = document.getElementById("query-results");
+
+    // Load currently stored sources when the page loads.
+    loadSources();
+    loadVectorStatus();
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = textarea.value.trim();
+      if (!text) return;
+
+      results.innerHTML = '<div class="muted">Analyzing...</div>';
+      resolveResults.innerHTML = '<div class="muted">Resolving...</div>';
+
+      try {
+        const response = await fetch("/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+
+        if (!response.ok) throw new Error("Request failed");
+        const data = await response.json();
+        renderResults(data);
+
+        // Attempt resolution right after analysis.
+        const resolveResp = await fetch("/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const resolveData = await resolveResp.json();
+        if (!resolveResp.ok) {
+          throw new Error(resolveData.error || "Resolve request failed");
+        }
+        renderResolveResults(resolveData);
+      } catch (error) {
+        results.innerHTML = `<div class="muted" style="color: var(--danger);">Something went wrong: ${error.message}</div>`;
+        resolveResults.innerHTML = `<div class="muted" style="color: var(--danger);">Resolve failed: ${error.message}</div>`;
+      }
+    });
+
+    sourcesForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData();
+      for (const file of sourceFiles.files) {
+        formData.append("files", file);
+      }
+      formData.append("links", sourceLinks.value || "");
+
+      sourceResults.innerHTML = '<div class="muted">Saving sources...</div>';
+
+      try {
+        const response = await fetch("/sources", {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) throw new Error("Request failed");
+        const data = await response.json();
+        renderSourceResults(data);
+      } catch (error) {
+        sourceResults.innerHTML = `<div class="muted" style="color: var(--danger);">Upload failed: ${error.message}</div>`;
+      }
+    });
+
+    ingestButton.addEventListener("click", async () => {
+      ingestResults.innerHTML = '<div class="muted">Ingesting uploads...</div>';
+      try {
+        const response = await fetch("/vector/ingest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        if (!response.ok) throw new Error("Request failed");
+        const data = await response.json();
+        renderIngestResults(data);
+        loadVectorStatus();
+      } catch (error) {
+        ingestResults.innerHTML = `<div class="muted" style="color: var(--danger);">Ingestion failed: ${error.message}</div>`;
+      }
+    });
+
+    queryForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = queryText.value.trim();
+      const k = Number(queryK.value) || 5;
+      if (!text) return;
+      queryResults.innerHTML = '<div class="muted">Querying...</div>';
+      try {
+        const response = await fetch("/vector/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, k }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Request failed");
+        renderQueryResults(data);
+      } catch (error) {
+        queryResults.innerHTML = `<div class="muted" style="color: var(--danger);">Query failed: ${error.message}</div>`;
+      }
+    });
+
+    function renderResults(data) {
+      if (!data.reference_count) {
+        results.innerHTML = '<div class="muted">No {REF} markers found yet.</div>';
+        return;
+      }
+
+      const items = data.references.map((ref) => {
+        return `
+          <article class="reference">
+            <div class="badge">REF ${ref.placeholder_number}</div>
+            <p><strong>Context:</strong> ${ref.context_sentence || "<em>(no sentence detected)</em>"}</p>
+            <p class="muted">${ref.note}</p>
+          </article>
+        `;
+      }).join("");
+
+      results.innerHTML = `
+        <div class="badge">Found ${data.reference_count} marker${data.reference_count > 1 ? "s" : ""}</div>
+        ${items}
+      `;
+    }
+
+    function renderResolveResults(data) {
+      if (data.error) {
+        resolveResults.innerHTML = `<div class="muted" style="color: var(--danger);">${data.error}</div>`;
+        return;
+      }
+      const bibItems = (data.bibliography || []).map(entry => `
+        <li>[${entry.number}] ${entry.filename} <span class="muted">${entry.note || ""}</span></li>
+      `).join("");
+
+      const refItems = (data.references || []).map(ref => `
+        <article class="reference">
+          <div class="badge">REF ${ref.ref_number} → ${ref.label}</div>
+          <p><strong>Context:</strong> ${ref.context || "(none)"} </p>
+          <p class="muted">${ref.hit ? `Hit: ${ref.hit.doc_id} (chunk ${ref.hit.chunk_index})` : "No hit"}</p>
+        </article>
+      `).join("");
+
+      resolveResults.innerHTML = `
+        <div class="badge">Resolved manuscript</div>
+        <p><strong>Output:</strong></p>
+        <div class="reference"><p>${(data.resolved_text || "").replace(/\\n/g, "<br>")}</p></div>
+        <p><strong>References (${(data.bibliography || []).length}):</strong></p>
+        <ul class="muted">${bibItems || "<li>No references</li>"}</ul>
+        <p><strong>Mapping:</strong></p>
+        ${refItems}
+      `;
+    }
+
+    function renderSourceResults(data) {
+      const files = data.all_files || data.saved_files || [];
+      const links = data.all_links || data.links || [];
+
+      if (!files.length && !links.length) {
+        sourceResults.innerHTML = '<div class="muted">No sources stored yet.</div>';
+        return;
+      }
+
+      const fileList = files.map((file) => `<li>${file.filename}</li>`).join("");
+      const linkList = links.map((link) => `<li>${link}</li>`).join("");
+
+      sourceResults.innerHTML = `
+        <div class="badge">Sources stored</div>
+        ${files.length ? `<p><strong>Files (${files.length}):</strong></p><ul class="muted">${fileList}</ul>` : ""}
+        ${links.length ? `<p><strong>Links (${links.length}):</strong></p><ul class="muted">${linkList}</ul>` : ""}
+        <p class="muted">${data.note || ""}</p>
+      `;
+    }
+
+    async function loadSources() {
+      try {
+        const response = await fetch("/sources");
+        if (!response.ok) throw new Error("Request failed");
+        const data = await response.json();
+        renderSourceResults(data);
+      } catch (error) {
+        sourceResults.innerHTML = '<div class="muted">Unable to load stored sources.</div>';
+      }
+    }
+
+    async function loadVectorStatus() {
+      vectorStatus.textContent = "Index status loading...";
+      try {
+        const response = await fetch("/vector/status");
+        const data = await response.json();
+        vectorStatus.textContent = `Vectors: ${data.vectors || 0} | Chunks: ${data.chunks_indexed || 0} | Docs: ${data.documents_indexed || 0}`;
+      } catch (error) {
+        vectorStatus.textContent = "Index status unavailable";
+      }
+    }
+
+    function renderIngestResults(data) {
+      const ingested = (data.ingested || []).map(item => `<li>${item.doc_id} (+${item.chunks_added} chunks)</li>`).join("");
+      const skipped = (data.skipped || []).map(item => `<li>${item.doc_id} (${item.reason})</li>`).join("");
+      ingestResults.innerHTML = `
+        <div class="badge">Ingestion complete</div>
+        <p><strong>Indexed docs:</strong> ${data.indexed_documents} | <strong>Indexed chunks:</strong> ${data.indexed_chunks}</p>
+        ${ingested ? `<p><strong>Added:</strong></p><ul class="muted">${ingested}</ul>` : ""}
+        ${skipped ? `<p><strong>Skipped:</strong></p><ul class="muted">${skipped}</ul>` : ""}
+      `;
+    }
+
+    function renderQueryResults(data) {
+      if (!data.count) {
+        queryResults.innerHTML = '<div class="muted">No hits returned.</div>';
+        return;
+      }
+      const items = data.results.map(hit => `
+        <article class="reference">
+          <div class="badge">Doc: ${hit.doc_id}</div>
+          <p><strong>Chunk #${hit.chunk_index}</strong> (score ${hit.score.toFixed(4)})</p>
+          <p class="muted">${hit.text_preview || "(no preview available)"}</p>
+        </article>
+      `).join("");
+      queryResults.innerHTML = `
+        <div class="badge">Top ${data.count} results</div>
+        ${items}
+      `;
+    }
+  </script>
+</body>
+</html>

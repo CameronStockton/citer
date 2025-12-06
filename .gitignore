@@ -1,0 +1,6 @@
+.venv
+grobid_runtime
+uploads
+data
+logs
+ARCHITECTURE.md
