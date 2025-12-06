@@ -4,3 +4,5 @@ uploads
 data
 logs
 ARCHITECTURE.md
+.deps_installed
+.grobid_setup_done

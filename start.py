@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent.resolve()
 DEPS_MARKER = ROOT / ".deps_installed"
 GROBID_DIR = ROOT / "grobid_runtime" / "grobid"
+GROBID_SETUP_MARKER = ROOT / ".grobid_setup_done"
 
 
 def run():
@@ -20,16 +21,20 @@ def run():
         print("  - Dependencies already installed (skipping). Delete .deps_installed to force reinstall.")
 
     print("[2/4] Downloading Grobid + JRE...")
-    if not GROBID_DIR.exists():
+    grobid_first_setup = not GROBID_SETUP_MARKER.exists()
+    if not GROBID_DIR.exists() or grobid_first_setup:
         subprocess.check_call([sys.executable, str(ROOT / "scripts" / "grobid_bootstrap.py"), "setup"])
+        GROBID_SETUP_MARKER.touch()
     else:
         print("  - Grobid runtime already present (skipping setup).")
 
     print("[3/4] Starting Grobid...")
     grobid_proc = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "grobid_bootstrap.py"), "start"])
-    grobid_first_start = not (GROBID_DIR.exists() and any(GROBID_DIR.iterdir()))
-    warmup = 60 if grobid_first_start else 10
+    warmup = 120 if grobid_first_setup else 20
+    print(f"  - Waiting ~{warmup} seconds for Grobid warm-up...")
     time.sleep(warmup)
+    if grobid_proc.poll() is not None:
+        raise RuntimeError("Grobid process exited unexpectedly during warm-up.")
 
     print("[4/4] Starting Application...")
     app_proc = subprocess.Popen([sys.executable, str(ROOT / "app.py")])

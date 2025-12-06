@@ -26,11 +26,26 @@ GROBID_DIR = BASE_DIR / "grobid"
 PORT = 8070
 GROBID_VERSION = "master"
 
-JDK_URLS = {
-    "Windows": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_x64_windows_hotspot_21.0.4_7.zip",
-    "Linux": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_x64_linux_hotspot_21.0.4_7.tar.gz",
-    "Darwin": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_x64_mac_hotspot_21.0.4_7.tar.gz",
-}
+def get_jdk_url():
+    system = platform.system()
+    machine = platform.machine().lower()
+
+    if system == "Windows":
+        return "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_x64_windows_hotspot_21.0.4_7.zip"
+
+    if system == "Linux":
+        return "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_x64_linux_hotspot_21.0.4_7.tar.gz"
+
+    if system == "Darwin":  # macOS
+        if "arm" in machine or "aarch64" in machine:
+            # Apple Silicon (M1/M2/M3)
+            return "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_aarch64_mac_hotspot_21.0.4_7.tar.gz"
+        else:
+            # Intel Macs
+            return "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.4%2B7/OpenJDK21U-jre_x64_mac_hotspot_21.0.4_7.tar.gz"
+
+    raise RuntimeError(f"No JDK download configured for platform {system}")
+
 
 GROBID_ZIP_URL = "https://github.com/kermitt2/grobid/archive/refs/heads/master.zip"
 
@@ -58,19 +73,19 @@ def extract_archive(archive: Path, target: Path):
 
 
 def ensure_jdk() -> Path:
-    system = platform.system()
-    url = JDK_URLS.get(system)
-    if not url:
-        raise RuntimeError(f"No JDK download configured for platform {system}")
-    if any(JDK_DIR.iterdir()) if JDK_DIR.exists() else False:
+    url = get_jdk_url()
+    if JDK_DIR.exists() and any(JDK_DIR.iterdir()):
         return find_java_home()
 
     archive = BASE_DIR / Path(url).name
     print(f"Downloading JDK21 from {url}")
+
     download(url, archive)
     extract_archive(archive, JDK_DIR)
     archive.unlink(missing_ok=True)
+
     return find_java_home()
+
 
 
 def find_java_home() -> Path:
