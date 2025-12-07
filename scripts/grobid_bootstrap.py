@@ -92,16 +92,26 @@ def find_java_home() -> Path:
     if not JDK_DIR.exists():
         raise RuntimeError("JDK not found; run setup first.")
 
-    # Resolve absolute paths
     jdk_dir = JDK_DIR.resolve()
 
-    # Search for any directory containing bin/java(.exe)
     for candidate in jdk_dir.iterdir():
-        java_bin = candidate / "bin" / ("java.exe" if platform.system() == "Windows" else "java")
+        if not candidate.is_dir():
+            continue
+
+        system = platform.system()
+
+        # Case 1: Linux/Windows standard layout
+        java_bin = candidate / "bin" / ("java.exe" if system == "Windows" else "java")
         if java_bin.exists():
             return candidate.resolve()
 
-    raise RuntimeError("Valid JDK not found: missing bin/java(.exe)")
+        # Case 2: macOS JDK layout: <jdk>/Contents/Home/bin/java
+        mac_java = candidate / "Contents" / "Home" / "bin" / "java"
+        if mac_java.exists():
+            return (candidate / "Contents" / "Home").resolve()
+
+    raise RuntimeError("Valid JDK not found: missing java binary inside bin/ or Contents/Home/bin/")
+
 
 
 
