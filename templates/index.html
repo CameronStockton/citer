@@ -141,6 +141,40 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+    .warning {
+      border-radius: 10px;
+      padding: 12px 14px;
+      background: #fff6d6;
+      color: #6b5300;
+      border: 1px solid rgba(255, 196, 0, 0.4);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    .warning svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+    .success {
+      border-radius: 10px;
+      padding: 12px 14px;
+      background: #e4f8e8;
+      color: #0f5132;
+      border: 1px solid rgba(25, 135, 84, 0.35);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    .success svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
     @media (max-width: 640px) {
       .card { padding: 20px; }
       textarea { min-height: 180px; }
@@ -149,11 +183,22 @@
 </head>
 <body>
   <main class="card">
+    {% if grobid_enabled %}
+      <div class="success" role="status">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+        Grobid is available. PDF extraction will use Grobid when possible.
+      </div>
+    {% else %}
+      <div class="warning" role="alert">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v2h2v-2zm0-6h-2v5h2v-5z"/></svg>
+        Grobid is unavailable right now. The built-in PDF parser will be used. Refresh after fixing Grobid to pick up changes.
+      </div>
+    {% endif %}
     <h1>Smart Paper Citation</h1>
-    <p>Drop your manuscript text below. We'll scan for <code>{REF}</code> placeholders and prep the snippets to feed into your AI search.</p>
+    <p>Drop your manuscript text below. We'll scan for <code>{REF}</code> or numbered markers like <code>{REF3}</code> and prep the snippets to feed into your AI search.</p>
     <form id="text-form">
       <label class="muted" for="manuscript">Manuscript text</label>
-      <textarea id="manuscript" name="manuscript" placeholder="Paste text containing {REF} markers..." required></textarea>
+      <textarea id="manuscript" name="manuscript" placeholder="Paste text containing {REF} or {REF3} markers..." required></textarea>
       <button type="submit">Analyze for References</button>
     </form>
     <section id="results" class="results" aria-live="polite">
@@ -319,16 +364,17 @@
 
     function renderResults(data) {
       if (!data.reference_count) {
-        results.innerHTML = '<div class="muted">No {REF} markers found yet.</div>';
+        results.innerHTML = '<div class="muted">No {REF}/{REFx} markers found yet.</div>';
         return;
       }
 
       const items = data.references.map((ref) => {
+        const requested = ref.requested || 1;
         return `
           <article class="reference">
-            <div class="badge">REF ${ref.placeholder_number}</div>
+            <div class="badge">REF ${ref.placeholder_number}${requested > 1 ? ` · x${requested}` : ""}</div>
             <p><strong>Context:</strong> ${ref.context_sentence || "<em>(no sentence detected)</em>"}</p>
-            <p class="muted">${ref.note}</p>
+            <p class="muted">${ref.note || `Requests ${requested} reference${requested !== 1 ? "s" : ""}`}</p>
           </article>
         `;
       }).join("");
@@ -348,13 +394,26 @@
         <li>[${entry.number}] ${entry.filename} <span class="muted">${entry.note || ""}</span></li>
       `).join("");
 
-      const refItems = (data.references || []).map(ref => `
+      const refItems = (data.references || []).map(ref => {
+        const requested = ref.requested || 1;
+        const hits = ref.hits || [];
+        const missing = Math.max(0, requested - hits.length);
+        const hitList = hits.map(hit => {
+          const scoreText = typeof hit.score === "number" ? hit.score.toFixed(4) : (hit.score || "n/a");
+          const textPreview = hit.text_preview || "(no preview available)";
+          return `<li>[${hit.citation_number}] ${hit.doc_id} · score ${scoreText}<br><span class="muted">${textPreview}</span></li>`;
+        }).join("");
+        return `
         <article class="reference">
-          <div class="badge">REF ${ref.ref_number} → ${ref.label}</div>
+          <div class="badge">REF ${ref.ref_number} → ${ref.label || "(unresolved)"}</div>
           <p><strong>Context:</strong> ${ref.context || "(none)"} </p>
-          <p class="muted">${ref.hit ? `Hit: ${ref.hit.doc_id} (chunk ${ref.hit.chunk_index})` : "No hit"}</p>
+          <p><strong>Requested:</strong> ${requested} reference${requested !== 1 ? "s" : ""}</p>
+          ${hitList ? `<p><strong>Hits:</strong></p><ul class="muted">${hitList}</ul>` : `<p class="muted">No hits returned.</p>`}
+          ${missing ? `<p class="muted">Missing ${missing} reference${missing !== 1 ? "s" : ""}.</p>` : ""}
+          ${ref.error ? `<p class="muted" style="color: var(--danger);">${ref.error}</p>` : ""}
         </article>
-      `).join("");
+      `;
+      }).join("");
 
       resolveResults.innerHTML = `
         <div class="badge">Resolved manuscript</div>

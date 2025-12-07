@@ -29,18 +29,28 @@ def run():
         print("  - Grobid runtime already present (skipping setup).")
 
     print("[3/4] Starting Grobid...")
-    grobid_proc = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "grobid_bootstrap.py"), "start"])
-    warmup = 120 if grobid_first_setup else 20
-    print(f"  - Waiting ~{warmup} seconds for Grobid warm-up...")
-    time.sleep(warmup)
-    if grobid_proc.poll() is not None:
-        raise RuntimeError("Grobid process exited unexpectedly during warm-up.")
+    grobid_available = True
+    try:
+        grobid_proc = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "grobid_bootstrap.py"), "start"])
+        warmup = 120 if grobid_first_setup else 20
+        print(f"  - Waiting ~{warmup} seconds for Grobid warm-up...")
+        time.sleep(warmup)
+        if grobid_proc.poll() is not None:
+            print("  ! Grobid exited unexpectedly during warm-up; continuing without Grobid.")
+            grobid_available = False
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ! Grobid failed to start ({exc}); continuing without Grobid.")
+        grobid_available = False
 
     print("[4/4] Starting Application...")
-    app_proc = subprocess.Popen([sys.executable, str(ROOT / "app.py")])
+    app_env = os.environ.copy()
+    if not grobid_available:
+        # Signal the app to disable Grobid usage and fall back to local parsing.
+        app_env["GROBID_DISABLED"] = "1"
+    app_proc = subprocess.Popen([sys.executable, str(ROOT / "app.py")], env=app_env)
 
     # Give the app a moment to start, then open the browser.
-    time.sleep(3)
+    time.sleep(6)
     try:
         webbrowser.open("http://127.0.0.1:8888")
     except Exception:

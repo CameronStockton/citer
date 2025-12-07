@@ -1,6 +1,5 @@
 # Smart Paper Citation (prototype)
 
-A tiny Flask app that lets you paste manuscript text, detects `{REF}` placeholders, and prepares the surrounding sentence for downstream AI-powered citation lookups. Front-end is intentionally simple and runs locally with no external services.
 
 ## Quickstart
 
@@ -28,7 +27,7 @@ A tiny Flask app that lets you paste manuscript text, detects `{REF}` placeholde
 
 ## Notes on vector store (FAISS)
 
-- The app initializes a FAISS CPU index on startup using a default dimension of 384 (adjust `VECTOR_DIM` in `app.py` to match your embedding model).
+- The app initializes a FAISS CPU index on startup using a default dimension of 768 (adjust `VECTOR_DIM` in `app.py` to match your embedding model).
 - Index path: `data/faiss.index`; metadata: `data/faiss.json`. These are created if missing and reused otherwise.
 - A lightweight, deterministic feature-hash embedding is used as a placeholder (no external model downloads) with `VECTOR_DIM=768`. Swap in your real embedding model and keep dimensions in sync.
 - Index path: `data/faiss.index`; metadata: `data/faiss.json`; chunk/doc metadata: `data/chunks.json`. These are created if missing and reused otherwise.

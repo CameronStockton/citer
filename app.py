@@ -16,6 +16,9 @@ import requests
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("citer")
+
 
 app = Flask(__name__)
 UPLOAD_DIR = Path("uploads")
@@ -30,14 +33,30 @@ CHUNKS_META_PATH = DATA_DIR / "chunks.json"
 DEFAULT_MAX_CHUNK_WORDS = 200
 DEFAULT_CHUNK_OVERLAP = 50
 GROBID_URL = os.getenv("GROBID_URL", "http://localhost:8070")
-GROBID_ENABLED = os.getenv("GROBID_DISABLED", "false").lower() not in {"1", "true", "yes"}
+GROBID_DISABLED_ENV = os.getenv("GROBID_DISABLED", "false").lower() in {"1", "true", "yes"}
 
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("smart-paper")
+
+def _compute_grobid_enabled() -> bool:
+    """Return whether Grobid should be used (env not disabled, health check passes)."""
+    if GROBID_DISABLED_ENV:
+        logger.info("GROBID_DISABLED is set; skipping Grobid.")
+        return False
+    try:
+        resp = requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
+        if resp.status_code == 200:
+            return True
+        logger.warning("Grobid health check returned status %s", resp.status_code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Grobid health check failed: %s", exc)
+    return False
+
+
+GROBID_ENABLED = _compute_grobid_enabled()
 
 # Matches the end of a sentence so we can find the sentence immediately before a {REF} marker.
 SENTENCE_END = re.compile(r"[.!?]")
-REF_MARKER = re.compile(r"\{REF\}")
+# Allow {REF}, {REF1}, {REF3}, etc.; {REF} is treated as {REF1}.
+REF_MARKER = re.compile(r"\{REF(\d+)?\}")
 
 
 def _sentence_before(text: str, position: int) -> str:
@@ -51,17 +70,20 @@ def _sentence_before(text: str, position: int) -> str:
 
 
 def extract_ref_context(text: str) -> List[Dict[str, Any]]:
-    """Find all {REF} markers and return surrounding context for later AI search."""
+    """Find all {REFx} markers and return surrounding context for later AI search."""
     contexts: List[Dict[str, Any]] = []
     for index, match in enumerate(REF_MARKER.finditer(text), start=1):
         sentence = _sentence_before(text, match.start())
+        requested = int(match.group(1)) if match.group(1) else 1
         contexts.append(
             {
                 "placeholder_number": index,
                 "start_index": match.start(),
+                "requested": requested,
+                "raw_marker": match.group(0),
                 "context_sentence": sentence,
                 "status": "pending",
-                "note": "Hook up your AI search here to resolve this reference.",
+                "note": f"Requests {requested} reference{'s' if requested != 1 else ''}",
             }
         )
     return contexts
@@ -248,7 +270,9 @@ def _extract_pdf_text(path: Path, columns: int | None = None) -> str:
     """Extract text from a PDF using Grobid if available, otherwise PyMuPDF with optional column handling."""
     logger.debug("Extracting PDF text from %s (columns=%s)", path, columns)
 
-    if GROBID_ENABLED:
+    grobid_ok = _compute_grobid_enabled()
+
+    if grobid_ok:
         try:
             grobid_text = _extract_with_grobid(path)
             if grobid_text.strip():
@@ -344,7 +368,8 @@ CHUNK_LOOKUP = {chunk["vector_id"]: chunk for chunk in CHUNKS_DB.get("chunks", [
 
 @app.route("/", methods=["GET"])
 def home():
-    return render_template("index.html")
+    grobid_status = _compute_grobid_enabled()
+    return render_template("index.html", grobid_enabled=grobid_status)
 
 
 @app.route("/analyze", methods=["POST"])
@@ -445,7 +470,8 @@ def _search_hits(query_text: str, k: int = 5) -> List[Dict[str, Any]]:
         raise ValueError("index is empty")
     dim = _index_dim()
     query_vec = _feature_hash(query_text, dim=dim).reshape(1, -1)
-    distances, indices = FAISS_INDEX.search(query_vec, k)
+    effective_k = max(1, min(int(k), int(FAISS_INDEX.ntotal)))
+    distances, indices = FAISS_INDEX.search(query_vec, effective_k)
     hits = []
     for dist, idx in zip(distances[0], indices[0]):
         if idx == -1:
@@ -467,7 +493,7 @@ def _search_hits(query_text: str, k: int = 5) -> List[Dict[str, Any]]:
 
 
 def _resolve_manuscript(text: str) -> Dict[str, Any]:
-    """Resolve {REF} markers by retrieving the top vector hit for each context."""
+    """Resolve {REFx} markers by retrieving vector hits for each context."""
     matches = list(REF_MARKER.finditer(text))
     if not matches:
         return {
@@ -485,28 +511,47 @@ def _resolve_manuscript(text: str) -> Dict[str, Any]:
     output_parts = []
     last_idx = 0
 
+    def assign_citation_number(doc_id: str) -> int:
+        if doc_id not in doc_to_number:
+            doc_to_number[doc_id] = len(doc_to_number) + 1
+        return doc_to_number[doc_id]
+
     for i, match in enumerate(matches, start=1):
         context_sentence = _sentence_before(text, match.start())
-        ref_label = "{REF}"
-        assigned_doc = None
-        hit = None
+        requested = int(match.group(1)) if match.group(1) else 1
+        requested = max(1, requested)
+        fallback_label = "{REF}" if requested == 1 else f"{{REF{requested}}}"
+        labels: List[str] = []
+        selected_hits: List[Dict[str, Any]] = []
+        error_note = ""
 
         if context_sentence.strip():
             try:
-                hits = _search_hits(context_sentence, k=3)
-                if hits:
-                    hit = hits[0]
-                    assigned_doc = hit["doc_id"]
-                    if assigned_doc not in doc_to_number:
-                        doc_to_number[assigned_doc] = len(doc_to_number) + 1
-                    ref_label = f"[{doc_to_number[assigned_doc]}]"
-                else:
-                    logger.debug("No hits for ref %s", i)
+                k = max(requested * 5, requested)
+                hits = _search_hits(context_sentence, k=k)
+                seen_docs = set()
+                for hit in hits:
+                    doc_id = hit["doc_id"]
+                    if doc_id in seen_docs:
+                        continue
+                    seen_docs.add(doc_id)
+                    citation_number = assign_citation_number(doc_id)
+                    selected_hits.append({**hit, "citation_number": citation_number})
+                    labels.append(f"[{citation_number}]")
+                    if len(selected_hits) >= requested:
+                        break
+                if not selected_hits:
+                    error_note = "No hits found for this reference."
+                elif len(selected_hits) < requested:
+                    error_note = f"Only found {len(selected_hits)} of {requested} requested reference(s)."
             except Exception as exc:  # noqa: BLE001
                 logger.error("Search failed for ref %s: %s", i, exc)
-                unresolved_refs.append({"ref_number": i, "context": context_sentence, "error": str(exc)})
+                error_note = f"Search failed: {exc}"
         else:
             logger.debug("Empty context for ref %s", i)
+            error_note = "Empty context; unable to search."
+
+        ref_label = "".join(labels) if labels else fallback_label
 
         output_parts.append(text[last_idx:match.start()])
         output_parts.append(ref_label)
@@ -516,10 +561,15 @@ def _resolve_manuscript(text: str) -> Dict[str, Any]:
             "ref_number": i,
             "label": ref_label,
             "context": context_sentence,
-            "hit": hit,
+            "requested": requested,
+            "hits": selected_hits,
+            "hit": selected_hits[0] if selected_hits else None,
         }
+        if error_note:
+            ref_entry["error"] = error_note
+
         resolved_refs.append(ref_entry)
-        if not hit:
+        if error_note or len(selected_hits) < requested:
             unresolved_refs.append(ref_entry)
 
     output_parts.append(text[last_idx:])
@@ -533,7 +583,7 @@ def _resolve_manuscript(text: str) -> Dict[str, Any]:
                 "doc_id": doc_id,
                 "filename": doc_meta.get("filename", doc_id),
                 "path": doc_meta.get("path", ""),
-                "note": "Placeholder citation; swap in real metadata when available.",
+                "note": "",
             }
         )
 
@@ -634,7 +684,7 @@ def vector_query():
 
 @app.route("/resolve", methods=["POST"])
 def resolve_manuscript():
-    """Resolve {REF} markers by searching the vector index and replacing with citations."""
+    """Resolve {REFx} markers by searching the vector index and replacing with citations."""
     payload = request.get_json(force=True, silent=True) or {}
     text = payload.get("text", "")
     if not text.strip():
