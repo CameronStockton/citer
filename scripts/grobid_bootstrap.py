@@ -129,6 +129,14 @@ def ensure_grobid() -> Path:
     grobid_root = extract_dest / "grobid-master"
     if not grobid_root.exists():
         raise RuntimeError("Grobid extraction failed or unexpected folder structure.")
+    
+    # -----------------------------
+    # FIX: make gradlew executable
+    # -----------------------------
+    gradlew = grobid_root / "gradlew"
+    gradlew = gradlew.resolve()
+    if gradlew.exists() and platform.system() != "Windows":
+        gradlew.chmod(gradlew.stat().st_mode | 0o111)
 
     return grobid_root.resolve()
 
